@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ledger — Broker Report Analyzer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink:      '#0B0F14',
+          panel:    '#121821',
+          panel2:   '#182130',
+          line:     '#232E3D',
+          ivory:    '#E7ECF0',
+          muted:    '#7C8A9C',
+          amber:    '#E8A33D',
+          amberdim: '#8A6524',
+          gain:     '#34D399',
+          loss:     '#F87171',
+        },
+        fontFamily: {
+          mono: ['JetBrains Mono', 'monospace'],
+          sans: ['Inter', 'sans-serif'],
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  body { background-color: #0B0F14; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #121821; }
+  ::-webkit-scrollbar-thumb { background: #232E3D; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2E3A4C; }
+
+  .dropzone-active {
+    border-color: #E8A33D !important;
+    background-color: rgba(232, 163, 61, 0.06) !important;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .rise { animation: rise 0.35s ease-out both; }
+
+  .ledger-row:hover { background-color: #182130; }
+
+  input[type=file] { display: none; }
+
+  .tab-underline {
+    position: relative;
+  }
+  .tab-underline::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: #E8A33D;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.25s ease;
+  }
+  .tab-underline.active::after { transform: scaleX(1); }
+</style>
+</head>
+
+<body class="min-h-screen bg-ink text-ivory font-sans antialiased">
+
+<!-- ===================== HEADER ===================== -->
+<header class="border-b border-line sticky top-0 z-30 bg-ink/90 backdrop-blur">
+  <div class="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-md bg-amber/10 border border-amber/30 flex items-center justify-center">
+        <span class="text-amber font-mono font-bold text-sm">L</span>
+      </div>
+      <div>
+        <h1 class="font-semibold text-[15px] leading-none tracking-tight">Ledger</h1>
+        <p class="text-[11px] text-muted leading-none mt-1">Broker report analyzer — runs entirely in your browser</p>
+      </div>
+    </div>
+    <div id="headerStatus" class="hidden sm:flex items-center gap-2 text-xs text-muted font-mono">
+      <span class="w-1.5 h-1.5 rounded-full bg-gain"></span>
+      <span id="headerStatusText">No file loaded</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-5 py-8">
+
+  <!-- ===================== IMPORT VIEW ===================== -->
+  <section id="importView">
+    <div class="mb-6">
+      <h2 class="text-2xl font-bold tracking-tight">Import your transaction report</h2>
+      <p class="text-muted text-sm mt-1 max-w-2xl">Drop the CSV export from your broker below, or paste the raw text directly. Everything is parsed and calculated locally — nothing leaves your browser.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <!-- Drop zone -->
+      <div>
+        <label for="fileInput"
+          id="dropzone"
+          class="group cursor-pointer flex flex-col items-center justify-center h-56 rounded-xl border-2 border-dashed border-line bg-panel hover:border-amberdim transition-colors text-center px-6">
+          <svg class="w-9 h-9 text-muted group-hover:text-amber transition-colors mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          <p class="text-sm font-medium text-ivory">Drop your .csv file here</p>
+          <p class="text-xs text-muted mt-1">or click to browse</p>
+        </label>
+        <input type="file" id="fileInput" accept=".csv,text/csv,text/plain" />
+        <p id="fileName" class="text-xs text-amber font-mono mt-2 truncate"></p>
+      </div>
+
+      <!-- Paste area -->
+      <div class="flex flex-col">
+        <textarea id="pasteArea"
+          placeholder="…or paste the raw CSV text here, including the header row"
+          class="flex-1 min-h-56 resize-none rounded-xl border border-line bg-panel px-4 py-3 text-xs font-mono text-ivory placeholder:text-muted/60 focus:outline-none focus:border-amberdim"></textarea>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3 mt-5">
+      <button id="parseBtn" class="px-5 py-2.5 rounded-lg bg-amber text-ink text-sm font-semibold hover:bg-amber/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+        Parse &amp; Calculate
+      </button>
+      <button id="sampleBtn" class="px-4 py-2.5 rounded-lg border border-line text-sm text-muted hover:text-ivory hover:border-amberdim transition-colors">
+        Load sample data
+      </button>
+      <span id="parseError" class="text-loss text-sm font-mono hidden"></span>
+    </div>
+
+    <div id="formatNote" class="mt-6 text-xs text-muted border border-line rounded-lg p-4 bg-panel/50">
+      <p class="font-semibold text-ivory mb-1.5">Expected columns (header row, order-independent)</p>
+      <p class="font-mono leading-relaxed break-words">Action, Time, ISIN, Ticker, Name, Notes, ID, No. of shares, Price / share, Currency (Price / share), Exchange rate, Result, Currency (Result), Total, Currency (Total), Charge amount, Currency (Charge amount), Deposit fee, Currency (Deposit fee), Currency conversion fee, Currency (Currency conversion fee), French transaction tax, Currency (French transaction tax)</p>
+    </div>
+  </section>
+
+  <!-- ===================== DASHBOARD VIEW ===================== -->
+  <section id="dashboardView" class="hidden">
+
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h2 class="text-2xl font-bold tracking-tight">Dashboard</h2>
+        <p id="dashSubtitle" class="text-muted text-sm mt-1"></p>
+      </div>
+      <button id="newImportBtn" class="text-xs px-3 py-2 rounded-lg border border-line text-muted hover:text-ivory hover:border-amberdim transition-colors">
+        ← Import different file
+      </button>
+    </div>
+
+    <!-- Hero metric -->
+    <div class="rounded-2xl border border-line bg-panel p-8 mb-5 text-center rise">
+      <p class="text-[11px] tracking-widest text-muted font-semibold uppercase">Net income after all fees</p>
+      <p id="netIncome" class="num font-mono text-5xl font-bold mt-3"></p>
+      <p id="netIncomeSub" class="text-muted text-xs mt-2"></p>
+    </div>
+
+    <!-- Metric cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div class="rounded-xl border border-line bg-panel p-4 rise" style="animation-delay:.03s">
+        <p class="text-[11px] text-muted uppercase tracking-wide">Realized gains</p>
+        <p id="cardRealized" class="num font-mono text-xl font-bold mt-2"></p>
+        <p id="cardRealizedSub" class="text-[11px] text-muted mt-1"></p>
+      </div>
+      <div class="rounded-xl border border-line bg-panel p-4 rise" style="animation-delay:.06s">
+        <p class="text-[11px] text-muted uppercase tracking-wide">FX fees</p>
+        <p id="cardFX" class="num font-mono text-xl font-bold mt-2 text-amber"></p>
+        <p id="cardFXSub" class="text-[11px] text-muted mt-1"></p>
+      </div>
+      <div class="rounded-xl border border-line bg-panel p-4 rise" style="animation-delay:.09s">
+        <p class="text-[11px] text-muted uppercase tracking-wide">Broker fees</p>
+        <p id="cardBroker" class="num font-mono text-xl font-bold mt-2 text-loss"></p>
+        <p id="cardBrokerSub" class="text-[11px] text-muted mt-1"></p>
+      </div>
+      <div class="rounded-xl border border-line bg-panel p-4 rise" style="animation-delay:.12s">
+        <p class="text-[11px] text-muted uppercase tracking-wide">Win rate</p>
+        <p id="cardWinRate" class="num font-mono text-xl font-bold mt-2"></p>
+        <p id="cardWinRateSub" class="text-[11px] text-muted mt-1"></p>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-6 border-b border-line mb-5 text-sm font-medium">
+      <button data-tab="gains" class="tabBtn tab-underline active pb-3 text-ivory">Realized Gains</button>
+      <button data-tab="fx" class="tabBtn tab-underline pb-3 text-muted">FX Fees</button>
+      <button data-tab="broker" class="tabBtn tab-underline pb-3 text-muted">Broker Commissions</button>
+    </div>
+
+    <!-- Table 1: Realized Gains -->
+    <div id="panel-gains" class="tabPanel">
+      <div class="flex items-center justify-between mb-3 gap-3">
+        <input id="gainsSearch" type="text" placeholder="Filter by ticker…" class="text-xs bg-panel border border-line rounded-lg px-3 py-2 w-48 focus:outline-none focus:border-amberdim placeholder:text-muted/60">
+        <select id="gainsSort" class="text-xs bg-panel border border-line rounded-lg px-3 py-2 focus:outline-none focus:border-amberdim">
+          <option value="dateDesc">Newest first</option>
+          <option value="dateAsc">Oldest first</option>
+          <option value="profitDesc">Highest profit</option>
+          <option value="profitAsc">Lowest profit</option>
+        </select>
+      </div>
+      <div class="rounded-xl border border-line overflow-hidden">
+        <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-panel2 text-muted text-[11px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th class="text-left font-semibold px-4 py-3">Ticker</th>
+                <th class="text-left font-semibold px-4 py-3">Sell date</th>
+                <th class="text-right font-semibold px-4 py-3">Shares</th>
+                <th class="text-right font-semibold px-4 py-3">Net profit / loss</th>
+                <th class="text-right font-semibold px-4 py-3">Currency</th>
+              </tr>
+            </thead>
+            <tbody id="gainsTableBody" class="divide-y divide-line font-mono text-[13px]"></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="text-xs text-muted mt-2 font-mono" id="gainsFooter"></p>
+    </div>
+
+    <!-- Table 2: FX Fees -->
+    <div id="panel-fx" class="tabPanel hidden">
+      <div class="rounded-xl border border-line overflow-hidden">
+        <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-panel2 text-muted text-[11px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th class="text-left font-semibold px-4 py-3">Date</th>
+                <th class="text-left font-semibold px-4 py-3">Ticker</th>
+                <th class="text-left font-semibold px-4 py-3">Transaction type</th>
+                <th class="text-right font-semibold px-4 py-3">FX fee amount</th>
+                <th class="text-right font-semibold px-4 py-3">Currency</th>
+              </tr>
+            </thead>
+            <tbody id="fxTableBody" class="divide-y divide-line font-mono text-[13px]"></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="text-xs text-muted mt-2 font-mono" id="fxFooter"></p>
+    </div>
+
+    <!-- Table 3: Broker Commissions -->
+    <div id="panel-broker" class="tabPanel hidden">
+      <div class="rounded-xl border border-line overflow-hidden">
+        <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-panel2 text-muted text-[11px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th class="text-left font-semibold px-4 py-3">Date</th>
+                <th class="text-left font-semibold px-4 py-3">Fee type / description</th>
+                <th class="text-right font-semibold px-4 py-3">Fee amount</th>
+                <th class="text-right font-semibold px-4 py-3">Currency</th>
+              </tr>
+            </thead>
+            <tbody id="brokerTableBody" class="divide-y divide-line font-mono text-[13px]"></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="text-xs text-muted mt-2 font-mono" id="brokerFooter"></p>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="max-w-6xl mx-auto px-5 py-10 text-center text-[11px] text-muted">
+  All parsing and math happen locally in your browser. No data is uploaded anywhere.
+</footer>
+
+<script>
+/* =========================================================================
+   LEDGER — Broker Report Analyzer
+   Vanilla JS. No dependencies beyond Tailwind (CDN, styling only).
+
+   Pipeline:
+     raw CSV text -> parseCSV() -> [transaction row objects]
+                  -> computeRealizedGains() (FIFO per ticker)
+                  -> extractFXFees()
+                  -> extractBrokerFees()
+                  -> render tables + summary cards
+   ========================================================================= */
+
+// ---------- State ----------
+let STATE = {
+  transactions: [],
+  realizedGains: [],
+  fxFees: [],
+  brokerFees: [],
+  totals: null
+};
+
+// ---------- Small helpers ----------
+const $ = (id) => document.getElementById(id);
+
+function toNumber(str) {
+  if (str === undefined || str === null) return 0;
+  const t = String(str).trim();
+  if (t === '') return 0;
+  const n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
+
+function fmtCurrency(value, currency = 'EUR') {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  const symbol = currency === 'EUR' ? '€' : (currency === 'USD' ? '$' : currency + ' ');
+  return `${sign}${symbol}${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtSigned(value, currency = 'EUR') {
+  return (value >= 0 ? '+' : '') + fmtCurrency(value, currency);
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: '2-digit' });
+}
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  return d.toLocaleString('en-GB', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function parseDate(raw) {
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(' ', 'T');
+  const d = new Date(cleaned);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ---------- CSV parsing (quote-aware) ----------
+function splitCSVLine(line) {
+  const result = [];
+  let current = '';
+  let insideQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (c === ',' && !insideQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += c;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+const REQUIRED_COLUMNS = ['Action', 'Time', 'Ticker', 'No. of shares', 'Price / share', 'Total'];
+
+function parseCSV(rawText) {
+  const cleaned = rawText.trim();
+  if (!cleaned) throw new Error('The pasted or imported data is empty.');
+
+  const lines = cleaned.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) throw new Error('No data rows found below the header.');
+
+  const headers = splitCSVLine(lines[0]).map(h => h.trim());
+  const colIndex = {};
+  headers.forEach((h, i) => { colIndex[h] = i; });
+
+  for (const req of REQUIRED_COLUMNS) {
+    if (!(req in colIndex)) {
+      throw new Error(`Required column "${req}" was not found in the CSV header.`);
+    }
+  }
+
+  const field = (fields, name) => {
+    const idx = colIndex[name];
+    if (idx === undefined || idx >= fields.length) return '';
+    return (fields[idx] || '').trim();
+  };
+
+  const transactions = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const fields = splitCSVLine(lines[i]);
+    if (fields.length < headers.length - 3) continue; // tolerate a few trailing empty cols
+
+    const action = field(fields, 'Action');
+    if (!action) continue;
+
+    const time = parseDate(field(fields, 'Time'));
+    if (!time) continue;
+
+    transactions.push({
+      id: field(fields, 'ID') || `row-${i}`,
+      action: action,
+      time: time,
+      isin: field(fields, 'ISIN'),
+      ticker: field(fields, 'Ticker'),
+      name: field(fields, 'Name'),
+      shares: toNumber(field(fields, 'No. of shares')),
+      pricePerShare: toNumber(field(fields, 'Price / share')),
+      priceCurrency: field(fields, 'Currency (Price / share)'),
+      result: field(fields, 'Result') === '' ? null : toNumber(field(fields, 'Result')),
+      resultCurrency: field(fields, 'Currency (Result)') || null,
+      total: toNumber(field(fields, 'Total')),
+      totalCurrency: field(fields, 'Currency (Total)') || 'EUR',
+      chargeAmount: toNumber(field(fields, 'Charge amount')),
+      depositFee: toNumber(field(fields, 'Deposit fee')),
+      currencyConversionFee: toNumber(field(fields, 'Currency conversion fee')),
+      frenchTransactionTax: toNumber(field(fields, 'French transaction tax')),
+    });
+  }
+
+  transactions.sort((a, b) => a.time - b.time);
+  return transactions;
+}
+
+// ---------- Realized gains engine ----------
+//
+// IMPORTANT METHODOLOGY NOTE:
+// Earlier iterations of this analysis (Python + the first Swift build) tried
+// to recompute cost-basis-vs-proceeds from scratch via FIFO lot matching.
+// That recomputation reliably drifted from the broker's own numbers —
+// verified against this exact dataset: a from-scratch FIFO rebuild produced
+// EUR 1,387.22, while the broker's own per-trade "Result" column sums to
+// EUR 2,544.13. The gap comes from how the broker nets certain fees and
+// partial-lot corporate actions into Result in ways not fully visible in
+// the raw columns.
+//
+// Conclusion (carried over from that investigation): the broker's "Result"
+// column is the trusted ground truth for P&L on each sell. We use it
+// directly instead of rebuilding it. FIFO share-matching is still run below
+// purely to report *how many shares* were involved in each sell — it does
+// not affect the profit figure at all.
+function computeRealizedGains(transactions) {
+  const results = [];
+  const tickers = [...new Set(transactions.map(t => t.ticker).filter(t => t))];
+
+  for (const ticker of tickers) {
+    const rows = transactions
+      .filter(t => t.ticker === ticker)
+      .sort((a, b) => a.time - b.time);
+
+    const lotQueue = []; // { shares } — used only to compute matchedShares for display
+    const name = (rows.find(r => r.name) || {}).name || ticker;
+
+    for (const txn of rows) {
+      const isBuy = txn.action === 'Market buy' || txn.action === 'Limit buy';
+      const isSell = txn.action === 'Market sell' || txn.action === 'Limit sell';
+
+      if (isBuy) {
+        lotQueue.push({ shares: txn.shares });
+      } else if (isSell) {
+        if (txn.shares <= 0) continue;
+
+        // Consume FIFO lots just to know how many shares had matching buy
+        // history in this dataset (informational only, doesn't affect profit).
+        let sharesToMatch = txn.shares;
+        let matchedShares = 0;
+        while (sharesToMatch > 1e-9 && lotQueue.length > 0) {
+          const oldest = lotQueue[0];
+          if (oldest.shares <= sharesToMatch + 1e-9) {
+            matchedShares += oldest.shares;
+            sharesToMatch -= oldest.shares;
+            lotQueue.shift();
+          } else {
+            matchedShares += sharesToMatch;
+            oldest.shares -= sharesToMatch;
+            sharesToMatch = 0;
+          }
+        }
+
+        // Ground-truth profit: the broker's own Result column for this sell.
+        // Fall back to Total (rare: missing Result) so no sell is silently dropped.
+        const netProfit = (txn.result !== null && txn.result !== undefined) ? txn.result : txn.total;
+
+        results.push({
+          ticker,
+          name,
+          sellDate: txn.time,
+          matchedShares: matchedShares > 1e-9 ? matchedShares : txn.shares,
+          netProfit,
+          currency: txn.resultCurrency || txn.totalCurrency
+        });
+      }
+    }
+  }
+
+  results.sort((a, b) => b.sellDate - a.sellDate);
+  return results;
+}
+
+function extractFXFees(transactions) {
+  return transactions
+    .filter(t => t.currencyConversionFee !== 0)
+    .map(t => ({
+      date: t.time,
+      ticker: t.ticker || '—',
+      transactionType: t.action,
+      amount: t.currencyConversionFee,
+      currency: t.totalCurrency
+    }))
+    .sort((a, b) => b.date - a.date);
+}
+
+function extractBrokerFees(transactions) {
+  const items = [];
+  for (const t of transactions) {
+    const ticker = t.ticker || null;
+    if (t.chargeAmount !== 0) {
+      items.push({ date: t.time, ticker, feeType: 'Broker Commission', amount: t.chargeAmount, currency: t.totalCurrency });
+    }
+    if (t.frenchTransactionTax !== 0) {
+      items.push({ date: t.time, ticker, feeType: 'French Transaction Tax', amount: t.frenchTransactionTax, currency: t.totalCurrency });
+    }
+    if (t.depositFee !== 0) {
+      items.push({ date: t.time, ticker, feeType: 'Deposit Fee', amount: t.depositFee, currency: t.totalCurrency });
+    }
+  }
+  items.sort((a, b) => b.date - a.date);
+  return items;
+}
+
+function computeTotals(realizedGains, fxFees, brokerFees) {
+  const totalRealizedGain = realizedGains.reduce((s, g) => s + g.netProfit, 0);
+  const winningPositions = realizedGains.filter(g => g.netProfit > 0).length;
+  const losingPositions = realizedGains.filter(g => g.netProfit < 0).length;
+
+  const totalFXFees = fxFees.reduce((s, f) => s + f.amount, 0);
+  const totalBrokerFees = brokerFees.filter(f => f.feeType === 'Broker Commission').reduce((s, f) => s + f.amount, 0);
+  const totalFrenchTax = brokerFees.filter(f => f.feeType === 'French Transaction Tax').reduce((s, f) => s + f.amount, 0);
+  const totalDepositFees = brokerFees.filter(f => f.feeType === 'Deposit Fee').reduce((s, f) => s + f.amount, 0);
+
+  const totalAllFees = totalFXFees + totalBrokerFees + totalFrenchTax + totalDepositFees;
+  const netIncome = totalRealizedGain - totalAllFees;
+  const winRate = realizedGains.length > 0 ? (winningPositions / realizedGains.length) * 100 : 0;
+
+  return {
+    totalRealizedGain, winningPositions, losingPositions,
+    totalFXFees, totalBrokerFees, totalFrenchTax, totalDepositFees,
+    totalAllFees, netIncome, winRate,
+    closedPositionCount: realizedGains.length
+  };
+}
+
+// ---------- Rendering ----------
+function renderDashboard() {
+  const t = STATE.totals;
+
+  $('dashSubtitle').textContent = `${STATE.transactions.length.toLocaleString()} transactions · ${t.closedPositionCount} closed positions`;
+
+  const netEl = $('netIncome');
+  netEl.textContent = fmtSigned(t.netIncome);
+  netEl.className = 'num font-mono text-5xl font-bold mt-3 ' + (t.netIncome >= 0 ? 'text-gain' : 'text-loss');
+  $('netIncomeSub').textContent = `Gross realized gains of ${fmtCurrency(t.totalRealizedGain)} minus ${fmtCurrency(t.totalAllFees)} in total fees`;
+
+  $('cardRealized').textContent = fmtSigned(t.totalRealizedGain);
+  $('cardRealized').className = 'num font-mono text-xl font-bold mt-2 ' + (t.totalRealizedGain >= 0 ? 'text-gain' : 'text-loss');
+  $('cardRealizedSub').textContent = `${t.winningPositions}W / ${t.losingPositions}L`;
+
+  $('cardFX').textContent = fmtCurrency(t.totalFXFees);
+  $('cardFXSub').textContent = `${STATE.fxFees.length} transactions`;
+
+  $('cardBroker').textContent = fmtCurrency(t.totalBrokerFees + t.totalFrenchTax + t.totalDepositFees);
+  $('cardBrokerSub').textContent = `commissions, tax & deposits`;
+
+  $('cardWinRate').textContent = t.winRate.toFixed(1) + '%';
+  $('cardWinRateSub').textContent = `${t.closedPositionCount} closed positions`;
+
+  renderGainsTable();
+  renderFXTable();
+  renderBrokerTable();
+
+  $('headerStatusText').textContent = `${STATE.transactions.length} transactions loaded`;
+}
+
+function renderGainsTable() {
+  const search = $('gainsSearch').value.trim().toLowerCase();
+  const sortMode = $('gainsSort').value;
+
+  let rows = [...STATE.realizedGains];
+  if (search) {
+    rows = rows.filter(g => g.ticker.toLowerCase().includes(search) || g.name.toLowerCase().includes(search));
+  }
+
+  switch (sortMode) {
+    case 'dateDesc': rows.sort((a, b) => b.sellDate - a.sellDate); break;
+    case 'dateAsc': rows.sort((a, b) => a.sellDate - b.sellDate); break;
+    case 'profitDesc': rows.sort((a, b) => b.netProfit - a.netProfit); break;
+    case 'profitAsc': rows.sort((a, b) => a.netProfit - b.netProfit); break;
+  }
+
+  const tbody = $('gainsTableBody');
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-10 font-sans">No matching closed positions.</td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(g => `
+      <tr class="ledger-row">
+        <td class="px-4 py-3 font-semibold text-ivory">${g.ticker}</td>
+        <td class="px-4 py-3 text-muted">${fmtDate(g.sellDate)}</td>
+        <td class="px-4 py-3 text-right text-muted">${g.matchedShares.toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
+        <td class="px-4 py-3 text-right font-semibold ${g.netProfit >= 0 ? 'text-gain' : 'text-loss'}">${fmtSigned(g.netProfit, g.currency)}</td>
+        <td class="px-4 py-3 text-right text-muted">${g.currency}</td>
+      </tr>
+    `).join('');
+  }
+
+  const total = rows.reduce((s, g) => s + g.netProfit, 0);
+  $('gainsFooter').textContent = `Showing ${rows.length} of ${STATE.realizedGains.length} · Sum: ${fmtSigned(total)}`;
+}
+
+function renderFXTable() {
+  const rows = [...STATE.fxFees];
+  const tbody = $('fxTableBody');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-10 font-sans">No FX fees found.</td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(f => `
+      <tr class="ledger-row">
+        <td class="px-4 py-3 text-muted">${fmtDateTime(f.date)}</td>
+        <td class="px-4 py-3 font-semibold text-ivory">${f.ticker}</td>
+        <td class="px-4 py-3 text-muted">${f.transactionType}</td>
+        <td class="px-4 py-3 text-right font-semibold text-amber">${fmtCurrency(f.amount, f.currency)}</td>
+        <td class="px-4 py-3 text-right text-muted">${f.currency}</td>
+      </tr>
+    `).join('');
+  }
+
+  const total = rows.reduce((s, f) => s + f.amount, 0);
+  $('fxFooter').textContent = `${rows.length} transactions · Sum: ${fmtCurrency(total)}`;
+}
+
+function renderBrokerTable() {
+  const rows = [...STATE.brokerFees];
+  const tbody = $('brokerTableBody');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-10 font-sans">No broker fees found.</td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(f => `
+      <tr class="ledger-row">
+        <td class="px-4 py-3 text-muted">${fmtDateTime(f.date)}</td>
+        <td class="px-4 py-3 text-ivory">${f.feeType}${f.ticker ? `<span class="text-muted"> · ${f.ticker}</span>` : ''}</td>
+        <td class="px-4 py-3 text-right font-semibold ${f.amount >= 0 ? 'text-loss' : 'text-gain'}">${fmtCurrency(f.amount, f.currency)}</td>
+        <td class="px-4 py-3 text-right text-muted">${f.currency}</td>
+      </tr>
+    `).join('');
+  }
+
+  const total = rows.reduce((s, f) => s + f.amount, 0);
+  $('brokerFooter').textContent = `${rows.length} line items · Sum: ${fmtCurrency(total)}`;
+}
+
+// ---------- Pipeline entry point ----------
+function runPipeline(rawText) {
+  const errEl = $('parseError');
+  errEl.classList.add('hidden');
+  errEl.textContent = '';
+
+  try {
+    const transactions = parseCSV(rawText);
+    if (transactions.length === 0) {
+      throw new Error('No valid transaction rows were found in the data.');
+    }
+
+    const realizedGains = computeRealizedGains(transactions);
+    const fxFees = extractFXFees(transactions);
+    const brokerFees = extractBrokerFees(transactions);
+    const totals = computeTotals(realizedGains, fxFees, brokerFees);
+
+    STATE = { transactions, realizedGains, fxFees, brokerFees, totals };
+
+    $('importView').classList.add('hidden');
+    $('dashboardView').classList.remove('hidden');
+    renderDashboard();
+  } catch (e) {
+    errEl.textContent = '⚠ ' + e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ---------- Sample data (mirrors real broker export structure) ----------
+const SAMPLE_CSV = `Action,Time,ISIN,Ticker,Name,Notes,ID,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Charge amount,Currency (Charge amount),Deposit fee,Currency (Deposit fee),Currency conversion fee,Currency (Currency conversion fee),French transaction tax,Currency (French transaction tax)
+Deposit,2026-01-02 16:21:36,,,,,dep-1,,,,,,,,250.00,EUR,1.75,EUR,,,,, 
+Market buy,2026-03-25 13:58:19,US5951121038,MU,Micron Technology Inc,,ord-101,0.50,379.59,USD,1.0842,,,164.21,EUR,,,,,0.62,EUR,,
+Market sell,2026-03-25 15:14:20,US5951121038,MU,Micron Technology Inc,,ord-102,0.50,376.57,USD,1.0839,-1.32,EUR,162.40,EUR,,,,,0.58,EUR,,
+Market buy,2026-06-02 14:42:54,594918104,CRWV,CoreWeave Inc,,ord-201,10.00,122.62,USD,1.0855,,,1054.23,EUR,,,,,3.95,EUR,,
+Market buy,2026-06-02 14:43:50,594918104,CRWV,CoreWeave Inc,,ord-202,3.00,122.64,USD,1.0855,,,316.36,EUR,,,,,1.18,EUR,,
+Market buy,2026-06-03 13:46:26,594918104,CRWV,CoreWeave Inc,,ord-203,7.00,112.60,USD,1.0870,,,680.27,EUR,,,,,2.55,EUR,,
+Market sell,2026-06-03 13:58:54,594918104,CRWV,CoreWeave Inc,,ord-204,20.00,111.34,USD,1.0871,-128.68,EUR,1916.23,EUR,,,,,7.18,EUR,,
+Market buy,2026-06-05 16:34:25,US5951121038,MU,Micron Technology Inc,,ord-301,0.40,905.81,USD,1.0910,,,314.91,EUR,,,,,1.18,EUR,,
+Market buy,2026-06-05 16:34:34,US5951121038,MU,Micron Technology Inc,,ord-302,0.10,907.76,USD,1.0910,,,78.90,EUR,,,,,0.30,EUR,,
+Market sell,2026-06-22 13:30:42,US5951121038,MU,Micron Technology Inc,,ord-401,0.50,983.20,USD,1.0785,45.11,EUR,455.72,EUR,,,,,4.67,EUR,,
+Deposit,2026-06-22 19:15:06,,,,,dep-2,,,,,,,,50.00,EUR,0.38,EUR,,,,,
+`;
+
+// ---------- Event wiring ----------
+$('parseBtn').addEventListener('click', () => {
+  const pasted = $('pasteArea').value.trim();
+  if (pasted) {
+    runPipeline(pasted);
+    return;
+  }
+  const fileInput = $('fileInput');
+  if (fileInput.files && fileInput.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (e) => runPipeline(e.target.result);
+    reader.readAsText(fileInput.files[0]);
+    return;
+  }
+  const errEl = $('parseError');
+  errEl.textContent = '⚠ Please choose a file or paste CSV text first.';
+  errEl.classList.remove('hidden');
+});
+
+$('sampleBtn').addEventListener('click', () => {
+  $('pasteArea').value = SAMPLE_CSV;
+  runPipeline(SAMPLE_CSV);
+});
+
+$('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('fileName').textContent = `Selected: ${file.name}`;
+  const reader = new FileReader();
+  reader.onload = (ev) => runPipeline(ev.target.result);
+  reader.readAsText(file);
+});
+
+// Drag & drop
+const dropzone = $('dropzone');
+['dragenter', 'dragover'].forEach(evt => {
+  dropzone.addEventListener(evt, (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.add('dropzone-active');
+  });
+});
+['dragleave', 'drop'].forEach(evt => {
+  dropzone.addEventListener(evt, (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.remove('dropzone-active');
+  });
+});
+dropzone.addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  $('fileName').textContent = `Selected: ${file.name}`;
+  const reader = new FileReader();
+  reader.onload = (ev) => runPipeline(ev.target.result);
+  reader.readAsText(file);
+});
+
+$('newImportBtn').addEventListener('click', () => {
+  $('dashboardView').classList.add('hidden');
+  $('importView').classList.remove('hidden');
+  $('headerStatusText').textContent = 'No file loaded';
+});
+
+$('gainsSearch').addEventListener('input', renderGainsTable);
+$('gainsSort').addEventListener('change', renderGainsTable);
+
+// Tabs
+document.querySelectorAll('.tabBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabBtn').forEach(b => {
+      b.classList.remove('active', 'text-ivory');
+      b.classList.add('text-muted');
+    });
+    btn.classList.add('active', 'text-ivory');
+    btn.classList.remove('text-muted');
+
+    document.querySelectorAll('.tabPanel').forEach(p => p.classList.add('hidden'));
+    $('panel-' + btn.dataset.tab).classList.remove('hidden');
+  });
+});
+</script>
+</body>
+</html>
